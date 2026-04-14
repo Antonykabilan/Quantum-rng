@@ -224,21 +224,7 @@ const InfoTooltip = ({ text }) => {
   );
 };
 
-// ─────────────────────────────────────────────
-// COMPONENT: Section heading divider
-// ─────────────────────────────────────────────
-const SectionHeading = ({ title, sub, color = COLORS.neon, right }) => (
-  <div className="flex items-center justify-between mb-4">
-    <div>
-      <div className="flex items-center gap-3">
-        <h3 className="font-mono font-bold tracking-widest uppercase text-sm" style={{ color }}>{title}</h3>
-        <div className="h-px flex-1" style={{ minWidth: 40, background: `linear-gradient(90deg,${color}55,transparent)` }} />
-      </div>
-      {sub && <p className="font-mono text-xs mt-0.5" style={{ color: COLORS.textDim }}>{sub}</p>}
-    </div>
-    {right}
-  </div>
-);
+
 
 // ─────────────────────────────────────────────
 // COMPONENT: Live Entropy Gauge
@@ -377,23 +363,7 @@ const ViewModeToggle = ({ mode, onChange }) => {
 // COMPONENT: Beam Splitter Animation (center)
 // ─────────────────────────────────────────────
 const BeamSplitterAnimation = ({ lastDirection, triggerKey }) => {
-  const pathVariants = {
-    incoming: {
-      pathLength: [0, 1],
-      opacity: [0, 1, 1, 0.2],
-      transition: { duration: 0.5, ease: "easeInOut" },
-    },
-    left: {
-      pathLength: [0, 1],
-      opacity: [0, 1, 1, 0],
-      transition: { duration: 0.45, delay: 0.45, ease: "easeOut" },
-    },
-    right: {
-      pathLength: [0, 1],
-      opacity: [0, 1, 1, 0],
-      transition: { duration: 0.45, delay: 0.45, ease: "easeOut" },
-    },
-  };
+
 
   return (
     <div className="flex flex-col items-center justify-center" style={{ minHeight: 120 }}>
