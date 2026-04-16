@@ -111,6 +111,66 @@ const detectPattern = (values) => {
   return lateReps > earlyReps * 1.2; // late-half has 20% more collisions
 };
 
+/** Detect sequential trends: runs of consecutive +1 or -1 differences */
+const detectSequentialTrends = (values) => {
+  if (values.length < 3) return { ascending: 0, descending: 0, maxRunLength: 0 };
+  let ascending = 0, descending = 0, maxRun = 0, currentRun = 1, lastDir = 0;
+  for (let i = 1; i < values.length; i++) {
+    const diff = values[i] - values[i - 1];
+    const dir = diff > 0 ? 1 : diff < 0 ? -1 : 0;
+    if (dir === lastDir && dir !== 0) {
+      currentRun++;
+      maxRun = Math.max(maxRun, currentRun);
+    } else {
+      currentRun = 1;
+    }
+    if (dir === 1) ascending++;
+    else if (dir === -1) descending++;
+    lastDir = dir;
+  }
+  return { ascending, descending, maxRunLength: maxRun };
+};
+
+/** Detect frequency bias: find the most frequent number and compute bias level */
+const detectFrequencyBias = (values, range = 1000) => {
+  if (!values.length) return { mostFrequent: null, maxCount: 0, biasLevel: "Random", expectedCount: 0 };
+  const freq = new Map();
+  values.forEach((v) => freq.set(v, (freq.get(v) || 0) + 1));
+  let mostFrequent = null, maxCount = 0;
+  freq.forEach((count, num) => {
+    if (count > maxCount) { maxCount = count; mostFrequent = num; }
+  });
+  const expectedCount = values.length / Math.min(range, values.length);
+  const ratio = maxCount / Math.max(expectedCount, 1);
+  let biasLevel = "Random";
+  if (ratio > 3.5) biasLevel = "Strong Pattern";
+  else if (ratio > 1.8) biasLevel = "Slight Bias";
+  return { mostFrequent, maxCount, biasLevel, expectedCount, freq };
+};
+
+/** Detect repeating cycles via substring comparison (limited to max 100 length for perf) */
+const detectCycle = (values) => {
+  if (values.length < 10) return { found: false, length: 0 };
+  const maxCycle = Math.min(Math.floor(values.length / 2), 100);
+  for (let len = 2; len <= maxCycle; len++) {
+    let isCycle = true;
+    for (let i = 0; i < len; i++) {
+      if (values[i] !== values[i + len]) { isCycle = false; break; }
+    }
+    if (isCycle) return { found: true, length: len };
+  }
+  return { found: false, length: 0 };
+};
+
+/** Build downsampled trend data for line chart */
+const buildTrendData = (values, maxPoints = 120) => {
+  if (!values.length) return [];
+  const raw = values.map((v, i) => ({ index: i + 1, value: v }));
+  if (raw.length <= maxPoints) return raw;
+  const step = Math.ceil(raw.length / maxPoints);
+  return raw.filter((_, i) => i % step === 0 || i === raw.length - 1);
+};
+
 /**
  * Export an array of values as a CSV download.
  */
@@ -652,6 +712,219 @@ const BitStreamTerminal = ({ bits }) => {
 };
 
 // ─────────────────────────────────────────────
+// COMPONENT: Pattern Indicator Panel (Classical)
+// Shows pattern detection badges with animations
+// ─────────────────────────────────────────────
+const PatternIndicatorPanel = ({ patternDetected, biasInfo, cycleInfo, trendInfo, totalSamples }) => {
+  const biasColor = biasInfo.biasLevel === "Strong Pattern" ? "#ff2200"
+    : biasInfo.biasLevel === "Slight Bias" ? "#ff8800" : "#44aa44";
+  const biasGlow = biasInfo.biasLevel !== "Random";
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(6,0,0,0.55)", border: `1px solid ${COLORS.border}` }}>
+      <p className="font-mono text-xs mb-3" style={{ color: COLORS.textDim }}>
+        PATTERN ANALYSIS — {totalSamples} samples
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {/* Repetition Badge */}
+        <motion.div
+          animate={patternDetected ? { boxShadow: ["0 0 8px rgba(255,68,0,0.3)", "0 0 18px rgba(255,68,0,0.6)", "0 0 8px rgba(255,68,0,0.3)"] } : {}}
+          transition={patternDetected ? { repeat: Infinity, duration: 1.5 } : {}}
+          className="rounded-lg p-2.5"
+          style={{
+            background: patternDetected ? "rgba(80,20,0,0.3)" : "rgba(10,4,4,0.5)",
+            border: `1px solid ${patternDetected ? "rgba(255,68,0,0.5)" : COLORS.border}`,
+          }}>
+          <p className="font-mono text-xs" style={{ color: COLORS.textDim, fontSize: "0.6rem" }}>REPETITION</p>
+          <p className="font-mono text-sm font-bold" style={{ color: patternDetected ? "#ff4400" : "#44aa44" }}>
+            {patternDetected ? "⚠ DETECTED" : "✓ MINIMAL"}
+          </p>
+        </motion.div>
+
+        {/* Most Frequent Badge */}
+        <div className="rounded-lg p-2.5"
+          style={{ background: "rgba(10,4,4,0.5)", border: `1px solid ${COLORS.border}` }}>
+          <p className="font-mono text-xs" style={{ color: COLORS.textDim, fontSize: "0.6rem" }}>MOST FREQUENT</p>
+          <p className="font-mono text-sm font-bold" style={{ color: COLORS.neon }}>
+            {biasInfo.mostFrequent !== null ? `#${biasInfo.mostFrequent}` : "—"}
+            {biasInfo.maxCount > 1 && (
+              <span className="font-mono text-xs ml-1" style={{ color: COLORS.textDim }}>×{biasInfo.maxCount}</span>
+            )}
+          </p>
+        </div>
+
+        {/* Pattern Type Badge */}
+        <motion.div
+          animate={biasGlow ? { boxShadow: [`0 0 6px ${biasColor}33`, `0 0 14px ${biasColor}66`, `0 0 6px ${biasColor}33`] } : {}}
+          transition={biasGlow ? { repeat: Infinity, duration: 2 } : {}}
+          className="rounded-lg p-2.5"
+          style={{
+            background: biasGlow ? "rgba(60,20,0,0.25)" : "rgba(10,4,4,0.5)",
+            border: `1px solid ${biasGlow ? `${biasColor}55` : COLORS.border}`,
+          }}>
+          <p className="font-mono text-xs" style={{ color: COLORS.textDim, fontSize: "0.6rem" }}>PATTERN TYPE</p>
+          <p className="font-mono text-sm font-bold" style={{ color: biasColor }}>
+            {biasInfo.biasLevel.toUpperCase()}
+          </p>
+        </motion.div>
+
+        {/* Cycle Detection Badge */}
+        <motion.div
+          animate={cycleInfo.found ? { boxShadow: ["0 0 8px rgba(255,0,0,0.3)", "0 0 20px rgba(255,0,0,0.7)", "0 0 8px rgba(255,0,0,0.3)"] } : {}}
+          transition={cycleInfo.found ? { repeat: Infinity, duration: 1.2 } : {}}
+          className="rounded-lg p-2.5"
+          style={{
+            background: cycleInfo.found ? "rgba(100,0,0,0.3)" : "rgba(10,4,4,0.5)",
+            border: `1px solid ${cycleInfo.found ? "rgba(255,0,0,0.6)" : COLORS.border}`,
+          }}>
+          <p className="font-mono text-xs" style={{ color: COLORS.textDim, fontSize: "0.6rem" }}>CYCLE DETECTION</p>
+          <p className="font-mono text-sm font-bold" style={{ color: cycleInfo.found ? "#ff0044" : "#44aa44" }}>
+            {cycleInfo.found ? `CYCLE len=${cycleInfo.length}` : "NO CYCLE"}
+          </p>
+        </motion.div>
+      </div>
+
+      {/* Trend summary row */}
+      {totalSamples > 10 && (
+        <div className="flex items-center gap-3 mt-2 pt-2" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+          <span className="font-mono text-xs" style={{ color: COLORS.textDim }}>
+            TRENDS: ↑{trendInfo.ascending} ↓{trendInfo.descending}
+          </span>
+          {trendInfo.maxRunLength >= 4 && (
+            <motion.span
+              animate={{ opacity: [1, 0.4, 1] }}
+              transition={{ repeat: Infinity, duration: 1.5 }}
+              className="font-mono text-xs px-2 py-0.5 rounded"
+              style={{ background: "rgba(255,68,0,0.15)", color: "#ff6600", border: "1px solid rgba(255,68,0,0.3)" }}>
+              MAX RUN: {trendInfo.maxRunLength}
+            </motion.span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENT: Frequency Heatmap (Classical)
+// 10×10 grid showing number frequency intensity
+// ─────────────────────────────────────────────
+const FrequencyHeatmap = ({ values, range = 1000 }) => {
+  const cells = 100;
+  const binSize = range / cells;
+
+  // Build frequency counts per cell
+  const counts = new Array(cells).fill(0);
+  values.forEach((v) => {
+    const idx = Math.min(Math.floor(v / binSize), cells - 1);
+    counts[idx]++;
+  });
+  const maxCount = Math.max(...counts, 1);
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(6,0,0,0.55)", border: `1px solid ${COLORS.border}` }}>
+      <p className="font-mono text-xs mb-2" style={{ color: COLORS.textDim }}>
+        FREQUENCY HEATMAP — {range} range / 100 cells
+      </p>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(10, 1fr)",
+        gap: 2,
+      }}>
+        {counts.map((count, i) => {
+          const intensity = count / maxCount;
+          const r = Math.floor(40 + intensity * 215);
+          const g = Math.floor(intensity * 30);
+          const isHot = intensity > 0.7 && count > 2;
+          return (
+            <motion.div
+              key={i}
+              title={`${Math.floor(i * binSize)}–${Math.floor((i + 1) * binSize - 1)}: ${count} hits`}
+              className="rounded-sm cursor-pointer"
+              style={{
+                height: 20,
+                background: count === 0
+                  ? "rgba(15,3,3,0.4)"
+                  : `rgba(${r},${g},0,${0.3 + intensity * 0.65})`,
+                border: isHot ? "1px solid rgba(255,100,0,0.6)" : "1px solid rgba(60,0,0,0.2)",
+                boxShadow: isHot ? `0 0 8px rgba(255,${g},0,0.4)` : "none",
+              }}
+              whileHover={{ scale: 1.3, zIndex: 10 }}
+              transition={{ duration: 0.1 }}
+            />
+          );
+        })}
+      </div>
+      {/* Legend */}
+      <div className="flex items-center justify-between mt-2">
+        <span className="font-mono" style={{ fontSize: "0.55rem", color: COLORS.textDim }}>0</span>
+        <div className="flex-1 mx-2 rounded-sm" style={{
+          height: 4,
+          background: "linear-gradient(90deg, rgba(40,5,0,0.5), rgba(180,20,0,0.7), rgba(255,60,0,0.95))",
+        }} />
+        <span className="font-mono" style={{ fontSize: "0.55rem", color: COLORS.textDim }}>{maxCount}</span>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENT: Sequence Trend Graph (Classical)
+// Line chart showing value progression over time
+// ─────────────────────────────────────────────
+const SequenceTrendGraph = ({ data, range = 1000, color = COLORS.classical }) => {
+  if (data.length < 3) return null;
+
+  // Compute mean for reference line
+  const mean = data.reduce((sum, d) => sum + d.value, 0) / data.length;
+
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(6,0,0,0.55)", border: `1px solid ${COLORS.border}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="font-mono text-xs" style={{ color: COLORS.textDim }}>
+          SEQUENCE TREND — value progression
+        </p>
+        <span className="font-mono text-xs px-2 py-0.5 rounded"
+          style={{ background: "rgba(30,0,0,0.5)", color: "#ff8800", border: "1px solid rgba(255,136,0,0.2)", fontSize: "0.6rem" }}>
+          MEAN: {mean.toFixed(0)}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={110}>
+        <LineChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+          <defs>
+            <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.25} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="2 4" stroke="rgba(80,0,0,0.12)" />
+          <XAxis dataKey="index" tick={{ fill: COLORS.textDim, fontSize: 7, fontFamily: "monospace" }}
+            label={{ value: "sample #", position: "insideBottomRight", offset: -4, fill: COLORS.textDim, fontSize: 7 }} />
+          <YAxis domain={[0, range]} tick={{ fill: COLORS.textDim, fontSize: 7 }} />
+          <Tooltip
+            contentStyle={{ background: "#0d0202", border: `1px solid ${color}55`, borderRadius: 8, fontFamily: "monospace", fontSize: 10 }}
+            labelStyle={{ color }}
+            itemStyle={{ color: COLORS.textMid }}
+            formatter={(v) => [v, "value"]}
+            labelFormatter={(l) => `sample #${l}`}
+          />
+          {/* Mean reference line */}
+          <Line type="monotone" dataKey={() => mean} stroke="#ff880066" strokeWidth={1}
+            strokeDasharray="4 4" dot={false} isAnimationActive={false} name="mean" />
+          {/* Actual trend line */}
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.5}
+            dot={false} isAnimationActive={false}
+            fill="url(#trendGrad)" />
+        </LineChart>
+      </ResponsiveContainer>
+      <p className="font-mono text-center mt-1" style={{ fontSize: "0.55rem", color: COLORS.textDim }}>
+        ◈ Visible clustering or trends indicate pseudo-random bias
+      </p>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
 // COMPONENT: Classical RNG Panel
 // ─────────────────────────────────────────────
 const ClassicalPanel = ({ speed, range, onValue }) => {
@@ -686,6 +959,18 @@ const ClassicalPanel = ({ speed, range, onValue }) => {
   const uniquenessData = buildUniquenessData(values, "classical");
   const repetitionData = buildRepetitionFrequency(values, 20, range);
   const patternDetected = detectPattern(values);
+
+  // ── New pattern detection data ──
+  const trendInfo = detectSequentialTrends(values);
+  const biasInfo = detectFrequencyBias(values, range);
+  const cycleInfo = detectCycle(values);
+  const trendChartData = buildTrendData(values, 120);
+
+  // Build a Set of repeated values for highlighting
+  const valueCounts = new Map();
+  values.forEach((v) => valueCounts.set(v, (valueCounts.get(v) || 0) + 1));
+  const repeatedSet = new Set();
+  valueCounts.forEach((count, num) => { if (count > 1) repeatedSet.add(num); });
 
   // Uniqueness stats
   const lastU = uniquenessData[uniquenessData.length - 1];
@@ -769,13 +1054,20 @@ const ClassicalPanel = ({ speed, range, onValue }) => {
         <div className="grid gap-0.5" style={{ gridTemplateColumns: "repeat(20, 1fr)" }}>
           {Array.from({ length: 20 }).map((_, i) => {
             const v = last20[i];
+            const isRepeated = v !== undefined && repeatedSet.has(v);
+            const isMostFreq = v !== undefined && v === biasInfo.mostFrequent;
             return (
-              <motion.div key={i} title={v?.toString()}
-                className="rounded-sm"
+              <motion.div key={i} title={v !== undefined ? `${v}${isRepeated ? " (repeated)" : ""}` : ""}
+                className={`rounded-sm${isMostFreq ? " pattern-pulse" : ""}`}
                 style={{
                   height: 18,
-                  background: v !== undefined ? `rgba(${Math.floor((v / range) * 180 + 40)},0,0,0.9)` : "rgba(20,5,5,0.3)",
-                  border: "1px solid rgba(80,0,0,0.2)",
+                  background: v !== undefined
+                    ? isRepeated
+                      ? "rgba(255,30,0,0.85)"
+                      : `rgba(${Math.floor((v / range) * 180 + 40)},0,0,0.9)`
+                    : "rgba(20,5,5,0.3)",
+                  border: isRepeated ? "1px solid rgba(255,80,0,0.7)" : "1px solid rgba(80,0,0,0.2)",
+                  boxShadow: isRepeated ? "0 0 6px rgba(255,50,0,0.5)" : "none",
                 }}
                 initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.15 }}
               />
@@ -820,6 +1112,27 @@ const ClassicalPanel = ({ speed, range, onValue }) => {
             height={110}
           />
         </div>
+      )}
+
+      {/* ── NEW: Pattern Analysis Panel ── */}
+      {values.length > 5 && (
+        <PatternIndicatorPanel
+          patternDetected={patternDetected}
+          biasInfo={biasInfo}
+          cycleInfo={cycleInfo}
+          trendInfo={trendInfo}
+          totalSamples={values.length}
+        />
+      )}
+
+      {/* ── NEW: Frequency Heatmap ── */}
+      {values.length > 10 && (
+        <FrequencyHeatmap values={values} range={range} />
+      )}
+
+      {/* ── NEW: Sequence Trend Graph ── */}
+      {values.length > 5 && (
+        <SequenceTrendGraph data={trendChartData} range={range} color={COLORS.classical} />
       )}
     </GlassCard>
   );
@@ -1326,6 +1639,12 @@ export default function App() {
         /* ── smooth hover glow on GlassCard ── */
         .glass-hover { transition: box-shadow 0.25s ease, border-color 0.25s ease; }
         .glass-hover:hover { box-shadow: 0 0 28px rgba(139,0,0,0.25) !important; }
+        /* ── pattern pulse animation for repeated values ── */
+        @keyframes patternPulse {
+          0%, 100% { box-shadow: 0 0 4px rgba(255,50,0,0.4); }
+          50% { box-shadow: 0 0 12px rgba(255,50,0,0.8); }
+        }
+        .pattern-pulse { animation: patternPulse 1.2s ease-in-out infinite; }
       `}</style>
 
       <div className="relative z-10 flex flex-col min-h-screen">
